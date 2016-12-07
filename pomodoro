@@ -19,10 +19,12 @@ function hasapp() {
 }
 
 hasapp notify-send || die "notify-send not found. Try installing libnotify"
-hasapp paplay || hasapp mplayer || die "paplay nor mplayer not found. Try installing pulseaudio or mplayer"
+hasapp aplay || hasapp paplay || hasapp mplayer || die "Neither aplay nor paplay nor mplayer found. Try installing alsa, pulseaudio or mplayer"
 
 function myplay() {
-  if hasapp paplay; then
+  if hasapp aplay; then
+    aplay   "$1" > /dev/null 2> /dev/null
+  elif hasapp paplay; then
     paplay  "$1" > /dev/null 2> /dev/null
   else
     mplayer "$1" > /dev/null 2> /dev/null
@@ -237,6 +239,6 @@ while true; do
 
   echo "$MSG"
   notify-send -u low -i "$SCRIPT_DIR/icon.svg" "Pomodoro" "$MSG"
-  myplay "$SCRIPT_DIR/complete.oga"
+  myplay "$SCRIPT_DIR/complete.wav"
 
 done
