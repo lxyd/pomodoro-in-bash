@@ -76,14 +76,14 @@ function printhelp() {
   echo
   echo "Examples:"
   echo "   w 25 - $(typename w) for 25 minutes"
-  echo "   s    - $(typename s) for $DEF_BSHORT minutes"
+  echo "   s    - $(typename s) for $(deftime s) minutes"
   echo "   14   - $(typename $(time2type 14)) ($(time2type 14)) for 14 minutes"
   echo "   +3   - continue previous activity for another 3 minutes"
   echo "   x    - quit program"
   echo
   echo "While timer is running you can use the following commands:"
   echo "   <space> - pause/resume"
-  echo "   x       - stop current timer and continue to next one"
+  echo "   x       - stop current timer and continue to the next one"
 }
 
 # $1 - prev activity type
@@ -96,7 +96,7 @@ function readtypetime() {
   local OUT_TYPE="$2"
   local OUT_TIME="$3"
   local FAIL=""
-  local MSG="What to do next? (default: $(typename $DEF_TYPE) for $DEF_TIME minutes): "
+  local MSG="What to do next? (default: $(typename $DEF_TYPE) for $(timefmt $(( DEF_TIME * 60 )) )): "
   
   echo -n "$MSG"
 
@@ -132,7 +132,7 @@ function readtypetime() {
       return 0
     elif [[ "$A" =~ ^\+[0-9]+$ ]]; then
       if [[ -z "$PREV_TYPE" ]]; then
-        FAIL="Cannot continue: no previous activity"
+        FAIL="Cannot continue: no previous activity yet"
       else
         read $OUT_TYPE < <(echo '+')
         read $OUT_TIME < <(echo ${A:1})
@@ -225,12 +225,12 @@ while true; do
   done
 
   case "$TYPE" in
-    w ) if (( CNT % BLONG_AFTER == 0 )); then
-        MSG="Pomodoro #$CNT is over. Time to get a long break"
-      else
-        MSG="Pomodoro #$CNT is over"
-      fi
-      ;;
+    w ) if [[ $(nexttype "$TYPE") == 'l' ]]; then
+          MSG="Pomodoro #$CNT is over. Time to get a long break"
+        else
+          MSG="Pomodoro #$CNT is over"
+        fi
+        ;;
     s ) MSG="Short break is over" ;;
     l ) MSG="Long break is over"  ;;
   esac
