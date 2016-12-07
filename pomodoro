@@ -1,0 +1,242 @@
+#!/usr/bin/env bash
+
+DEF_BSHORT=5
+MAX_BSHORT=9
+DEF_BLONG=15
+MAX_BLONG=15
+DEF_WORK=25
+BLONG_AFTER=4
+STEP=60
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")"; pwd)"
+
+function die() {
+  echo "$@" >&2 && exit 1
+}
+
+function hasapp() {
+  which "$1" > /dev/null 2> /dev/null && return 0 || return 1
+}
+
+hasapp notify-send || die "notify-send not found. Try installing libnotify"
+hasapp paplay || hasapp mplayer || die "paplay nor mplayer not found. Try installing pulseaudio or mplayer"
+
+function myplay() {
+  if hasapp paplay; then
+    paplay  "$1" > /dev/null 2> /dev/null
+  else
+    mplayer "$1" > /dev/null 2> /dev/null
+  fi
+}
+
+function typename() {
+  case "$1" in
+    w ) echo "work"    ;;
+    s ) echo "short break" ;;
+    l ) echo "long break"  ;;
+  esac
+}
+
+function deftime() {
+  case "$1" in
+    w ) echo $DEF_WORK   ;;
+    s ) echo $DEF_BSHORT ;;
+    l ) echo $DEF_BLONG  ;;
+  esac
+}
+
+function time2type() {
+  if (( "$1" <= MAX_BSHORT )); then
+    echo s
+  elif (( "$1" <= MAX_BLONG )); then
+    echo l
+  else
+    echo w
+  fi
+}
+
+# $1 - previous type (w/s/l)
+function nexttype() {
+  if [[ "$1" == w ]]; then
+    if (( CNT % BLONG_AFTER == 0 )); then
+      echo l
+    else
+      echo s
+    fi
+  else
+    echo w
+  fi
+}
+
+function printhelp() {
+  echo "Enter next activity (w/s/l) and/or its duration in minutes"
+  echo "When duration is omitted, typical activity duration is used"
+  echo "Activity might be guessed by the duration you entered"
+  echo "You can also type '+minutes' to continue previous activity"
+  echo
+  echo "Examples:"
+  echo "   w 25 - $(typename w) for 25 minutes"
+  echo "   s    - $(typename s) for $DEF_BSHORT minutes"
+  echo "   14   - $(typename $(time2type 14)) ($(time2type 14)) for 14 minutes"
+  echo "   +3   - continue previous activity for another 3 minutes"
+  echo "   x    - quit program"
+  echo
+  echo "While timer is running you can use the following commands:"
+  echo "   <space> - pause/resume"
+  echo "   x       - stop current timer and continue to next one"
+}
+
+# $1 - prev activity type
+# $2 - var name to put next type (w/s/l/+/x) into
+# $3 - var name to put next time into
+function readtypetime() {
+  local DEF_TYPE=$(nexttype "$1")
+  local DEF_TIME=$(deftime $DEF_TYPE)
+  local PREV_TYPE="$1"
+  local OUT_TYPE="$2"
+  local OUT_TIME="$3"
+  local FAIL=""
+  local MSG="What to do next? (default: $(typename $DEF_TYPE) for $DEF_TIME minutes): "
+  
+  echo -n "$MSG"
+
+  while true; do
+    FAIL=""
+    read A B
+    
+    if [[ "$A" == 'h' ]]; then
+      echo
+      printhelp
+      echo
+      echo -n "$MSG"
+    elif [[ "$A" == 'x' ]]; then
+      read $OUT_TYPE < <(echo 'x')
+      return 0
+    elif [[ -z "$A" ]] && [[ -z "$B" ]]; then
+      read $OUT_TYPE < <(echo "$DEF_TYPE")
+      read $OUT_TIME < <(echo "$DEF_TIME")
+      return 0
+    elif [[ -n "$B" ]]; then
+      if ! [[ "$A" =~ ^[wsl]$ ]]; then
+        FAIL="'$A' is not valid activity"
+      elif ! (( B > 0 )); then
+        FAIL="'$B' is not valid activity time"
+      else
+        read $OUT_TYPE < <(echo "$A")
+        read $OUT_TIME < <(echo "$B")
+        return 0
+      fi
+    elif [[ "$A" =~ ^[wsl]$ ]]; then
+      read $OUT_TYPE < <(echo "$A")
+      read $OUT_TIME < <(deftime "$A")
+      return 0
+    elif [[ "$A" =~ ^\+[0-9]+$ ]]; then
+      if [[ -z "$PREV_TYPE" ]]; then
+        FAIL="Cannot continue: no previous activity"
+      else
+        read $OUT_TYPE < <(echo '+')
+        read $OUT_TIME < <(echo ${A:1})
+        return 0
+      fi
+    elif [[ "$A" =~ ^[0-9]+$ ]]; then
+      read $OUT_TYPE < <(time2type $A)
+      read $OUT_TIME < <(echo $A)
+      return 0
+    else
+      FAIL="'$A' is not recognized"
+    fi
+
+    if [[ -n "$FAIL" ]]; then
+      echo
+      echo -n "$FAIL. Try again (type 'h' for help): "
+    fi
+  done
+}
+
+# $1 - seconds
+function timefmt() {
+  local T=$1
+  local SPACE=""
+  MIN=$(( T / 60 ))
+  SEC=$(( T % 60 ))
+  if (( MIN % 10 == 1 )); then
+    SPACE=" "
+    echo -n "$MIN minute"
+  elif (( MIN > 0 )); then
+    SPACE=" "
+    echo -n "$MIN minutes"
+  fi
+  if (( SEC % 10 == 1 )); then
+    echo -n "$SPACE$SEC second"
+  elif (( SEC > 0 )) || (( MIN == 0 )); then
+    echo -n "$SPACE$SEC seconds"
+  fi
+  echo
+}
+
+CNT=0
+TIME=0
+TYPE=
+
+while true; do
+  
+  readtypetime "$TYPE" _OUT_TYPE _OUT_TIME
+  
+  [[ $_OUT_TYPE == 'x' ]] && echo 'Exiting...' && break
+  [[ $_OUT_TYPE == 'w' ]] && CNT=$(( CNT + 1 ))
+  [[ $_OUT_TYPE != '+' ]] && TYPE=$_OUT_TYPE
+  TIME=$_OUT_TIME
+
+  N=$(( TIME * 60 ))
+  NEXT_STEP=$STEP
+  I=0
+  while (( I < N )); do
+    if [[ $TYPE == w ]]; then
+      echo -n "Pomodoro #$CNT: "
+    else
+      echo -n "$(typename $TYPE | sed 's/.*/\u&/'): "
+    fi
+    echo "$( timefmt $(( N - I )) ) left "
+    
+    BEGIN_SLEEP=$(date +%s)
+    if IFS='' read -n 1 -t $NEXT_STEP A; then
+      END_SLEEP=$(date +%s)
+      
+      I=$(( I + END_SLEEP - BEGIN_SLEEP ))
+      NEXT_STEP=$(( NEXT_STEP + BEGIN_SLEEP - END_SLEEP ))
+      
+      if [[ "$A" == " " ]]; then
+        echo
+        echo "Paused at $(timefmt $I). Press any key to continue... "
+        read -n 1 && echo
+      elif [[ "$A" == 'x' ]]; then
+        echo
+        echo "Stopped at $(timefmt $I)"
+        break
+      elif [[ "$A" != '' ]]; then
+        echo
+        echo "Unrecognized command '$A'"
+      fi
+    else
+      echo
+      I=$(( I + NEXT_STEP ))
+      NEXT_STEP=$STEP
+    fi
+  done
+
+  case "$TYPE" in
+    w ) if (( CNT % BLONG_AFTER == 0 )); then
+        MSG="Pomodoro #$CNT is over. Time to get a long break"
+      else
+        MSG="Pomodoro #$CNT is over"
+      fi
+      ;;
+    s ) MSG="Short break is over" ;;
+    l ) MSG="Long break is over"  ;;
+  esac
+
+  echo "$MSG"
+  notify-send -u low -i "$SCRIPT_DIR/icon.svg" "Pomodoro" "$MSG"
+  myplay "$SCRIPT_DIR/complete.oga"
+
+done
